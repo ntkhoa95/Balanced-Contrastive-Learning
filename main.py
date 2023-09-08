@@ -12,6 +12,7 @@ from dataset.inat import INaturalist
 from dataset.mosquito import MosquitoDataset
 from dataset.imagenet import ImageNetLT
 # from models import resnet_big, resnext
+from models.model_pool import ModelwEmb
 from models import resnext
 import warnings
 import torch.backends.cudnn as cudnn
@@ -27,7 +28,7 @@ import numpy as np
 parser = argparse.ArgumentParser()
 parser.add_argument('--dataset', default='imagenet', choices=['inat', 'imagenet', "mosquito"])
 parser.add_argument('--data', default='/DATACENTER/raid5/zjg/imagenet', metavar='DIR')
-parser.add_argument('--arch', default='resnext50', choices=['resnet50', 'resnext50'])
+parser.add_argument('--arch', default='resnext50')
 parser.add_argument('--workers', default=12, type=int)
 parser.add_argument('--epochs', default=90, type=int)
 parser.add_argument('--temp', default=0.07, type=float, help='scalar temperature for contrastive learning')
@@ -113,15 +114,26 @@ def main_worker(gpu, ngpus_per_node, args):
     elif args.arch == 'resnext50':
         model = resnext.BCLModel(name='resnext50', num_classes=num_classes, feat_dim=args.feat_dim,
                                  use_norm=args.use_norm)
+    elif str(args.arch).startswith("convnext") or str(args.arch).startswith("maxvit"):
+        feat_dim = 1024 if str(args.arch).startswith("convnext") else 768
+        model = ModelwEmb(
+            num_classes=num_classes,
+            arch=args.arch,
+            pretrained=True,
+            feat_dim=feat_dim
+        )
     else:
         raise NotImplementedError('This model is not supported')
-    # print(model)
 
-    if args.gpu is not None:
-        torch.cuda.set_device(args.gpu)
-        model = model.cuda(args.gpu)
+    # if args.gpu is not None:
+    if torch.cuda.is_available():
+        device = torch.device("cuda")
     else:
-        model = torch.nn.DataParallel(model).cuda()
+        device = torch.device("cpu")
+    # torch.cuda.set_device(args.gpu)
+    model = model.to(device)
+    # else:
+    #     model = torch.nn.DataParallel(model).cuda()
 
     optimizer = torch.optim.SGD(model.parameters(), args.lr, momentum=args.momentum, weight_decay=args.weight_decay)
 
