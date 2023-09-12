@@ -173,10 +173,10 @@ def main_worker(gpu, ngpus_per_node, args):
     rgb_mean = (0.485, 0.456, 0.406)
     ra_params = dict(translate_const=int(224 * 0.45), img_mean=tuple([min(255, round(255 * x)) for x in rgb_mean]), )
     augmentation_randncls = [
-        # transforms.RandomResizedCrop(224, scale=(0.08, 1.)),
         transforms.Resize((224, 224)),
         transforms.CenterCrop((224, 224)),
         transforms.RandomHorizontalFlip(),
+        transforms.RandomVerticalFlip(),
         transforms.RandomApply([
             transforms.ColorJitter(0.4, 0.4, 0., 0.0)
         ], p=0.5),
@@ -185,10 +185,10 @@ def main_worker(gpu, ngpus_per_node, args):
         normalize,
     ]
     augmentation_randnclsstack = [
-        # transforms.RandomResizedCrop(224),
         transforms.Resize((224, 224)),
         transforms.CenterCrop((224, 224)),
         transforms.RandomHorizontalFlip(),
+        transforms.RandomVerticalFlip(),
         transforms.RandomApply([
             transforms.ColorJitter(0.4, 0.4, 0., 0.)
         ], p=0.5),
@@ -198,8 +198,11 @@ def main_worker(gpu, ngpus_per_node, args):
         normalize,
     ]
     augmentation_sim = [
-        # transforms.RandomResizedCrop(224),
-        transforms.RandomRotation(degrees=(0, 180)),
+        transforms.RandomApply([
+            transforms.RandomRotation(degrees=90),
+            transforms.RandomRotation(degrees=180),
+            transforms.RandomRotation(degrees=270)
+        ], p=0.5),
         transforms.RandomAdjustSharpness(3, p=0.5),
         transforms.Resize((224, 224)),
         transforms.CenterCrop((224, 224)),
