@@ -76,7 +76,8 @@ def main():
         default=False,
         help="onnx opset version",
     )
-
+    parser.add_argument('--feat_dim', default=1024, type=int, help='feature dimension of mlp head')
+    parser.add_argument('--use_norm', default=True, type=bool, help='cosine classifier.')
     args = parser.parse_args()
     checkpoint_dir = args.checkpoint_dir
     # config_path = os.path.join(checkpoint_dir, "config_model.json")
@@ -117,7 +118,7 @@ def main():
 
     print("Loading model weight...")
     checkpoint = torch.load(checkpoint_dir, map_location=torch.device('cpu'))
-    model.load_state_dict(checkpoint["model"], strict=True)
+    model.load_state_dict(checkpoint["state_dict"], strict=True)
     model.eval()
     # make directory to save onnx model
     pathlib.Path(onnx_output_dir).mkdir(parents=True, exist_ok=True)
