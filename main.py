@@ -7,9 +7,9 @@ from loss.contrastive import BalSCL
 from loss.logitadjust import LogitAdjust
 import math
 from tensorboardX import SummaryWriter
-from dataset.inat import INaturalist
+# from dataset.inat import INaturalist
 from dataset.mosquito import MosquitoDataset
-from dataset.imagenet import ImageNetLT
+# from dataset.imagenet import ImageNetLT
 from models.model_pool import ModelwEmb
 from models import resnext
 import warnings
@@ -131,7 +131,8 @@ def main_worker(gpu, ngpus_per_node, args):
     # else:
     #     model = torch.nn.DataParallel(model).cuda()
 
-    optimizer = torch.optim.SGD(model.parameters(), args.lr, momentum=args.momentum, weight_decay=args.weight_decay)
+    # optimizer = torch.optim.SGD(model.parameters(), args.lr, momentum=args.momentum, weight_decay=args.weight_decay)
+    optimizer = torch.optim.AdamW(model.parameters(), args.lr, weight_decay=args.weight_decay)
 
     ## freezing
     def count_parameters(model):
@@ -184,39 +185,42 @@ def main_worker(gpu, ngpus_per_node, args):
     rgb_mean = (0.485, 0.456, 0.406)
     ra_params = dict(translate_const=int(224 * 0.45), img_mean=tuple([min(255, round(255 * x)) for x in rgb_mean]), )
     augmentation_randncls = [
-        transforms.Resize((224, 224)),
-        transforms.CenterCrop((224, 224)),
+        # transforms.Resize((224, 224)),
+        # transforms.CenterCrop((224, 224)),
+        transforms.RandomResizedCrop(224, scale=(0.08, 1.)),
         transforms.RandomHorizontalFlip(),
         transforms.RandomVerticalFlip(),
         transforms.RandomApply([
             transforms.ColorJitter(0.4, 0.4, 0., 0.0)
-        ], p=0.5),
+        ], p=1.0),
         rand_augment_transform('rand-n{}-m{}-mstd0.5'.format(args.randaug_n, args.randaug_m), ra_params),
         transforms.ToTensor(),
         normalize,
     ]
     augmentation_randnclsstack = [
-        transforms.Resize((224, 224)),
-        transforms.CenterCrop((224, 224)),
+        # transforms.Resize((224, 224)),
+        # transforms.CenterCrop((224, 224)),
+        transforms.RandomResizedCrop(224),
         transforms.RandomHorizontalFlip(),
         transforms.RandomVerticalFlip(),
         transforms.RandomApply([
             transforms.ColorJitter(0.4, 0.4, 0., 0.)
-        ], p=0.5),
+        ], p=0.8),
         transforms.RandomGrayscale(p=0.2),
         rand_augment_transform('rand-n{}-m{}-mstd0.5'.format(args.randaug_n, args.randaug_m), ra_params),
         transforms.ToTensor(),
         normalize,
     ]
     augmentation_sim = [
+        transforms.RandomResizedCrop(224),
         transforms.RandomApply([
             transforms.RandomRotation(degrees=90),
             transforms.RandomRotation(degrees=180),
             transforms.RandomRotation(degrees=270)
         ], p=0.5),
         transforms.RandomAdjustSharpness(3, p=0.5),
-        transforms.Resize((224, 224)),
-        transforms.CenterCrop((224, 224)),
+        # transforms.Resize((224, 224)),
+        # transforms.CenterCrop((224, 224)),
         transforms.RandomHorizontalFlip(),
         transforms.RandomVerticalFlip(),
         transforms.RandomApply([
@@ -278,7 +282,7 @@ def main_worker(gpu, ngpus_per_node, args):
 
     ## need consider this attribute
     print(train_dataset.class_to_idx)
-    print(np.unique(train_dataset.targets, return_counts=True))
+    print(np.unique(val_dataset.targets, return_counts=True))
     cls_num_list = np.unique(train_dataset.targets, return_counts=True)[1].tolist()
     args.cls_num = len(cls_num_list)
 
