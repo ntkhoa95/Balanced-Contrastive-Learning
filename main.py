@@ -2,7 +2,6 @@ import torch
 import time
 import shutil
 from torchvision.transforms import transforms
-# from torch.utils.data import DataLoader
 import torch.nn.functional as F
 from loss.contrastive import BalSCL
 from loss.logitadjust import LogitAdjust
@@ -11,7 +10,6 @@ from tensorboardX import SummaryWriter
 from dataset.inat import INaturalist
 from dataset.mosquito import MosquitoDataset
 from dataset.imagenet import ImageNetLT
-# from models import resnet_big, resnext
 from models.model_pool import ModelwEmb
 from models import resnext
 import warnings
@@ -19,7 +17,6 @@ import torch.backends.cudnn as cudnn
 import random
 from randaugment import rand_augment_transform
 from utils import GaussianBlur, shot_acc
-from utils import count_parameters, freeze_backbone
 import argparse
 import os
 import numpy as np
@@ -136,6 +133,21 @@ def main_worker(gpu, ngpus_per_node, args):
 
     optimizer = torch.optim.SGD(model.parameters(), args.lr, momentum=args.momentum, weight_decay=args.weight_decay)
 
+    ## freezing
+    def count_parameters(model):
+        return sum(p.numel() for p in model.parameters() if p.requires_grad)
+
+    def freeze_backbone(model):
+        num_train_params = count_parameters(model)
+        print(f"Train params before freezing: {num_train_params}")
+        for parameter in model.parameters():
+            parameter.requires_grad = False
+        for parameter in model.head.parameters():
+            parameter.requires_grad = True
+        num_train_params = count_parameters(model)
+        print(f"Train params after freezing: {num_train_params}")
+        return model
+    
     # optionally resume from a checkpoint
     if args.resume:
         if os.path.isfile(args.resume):
@@ -148,11 +160,10 @@ def main_worker(gpu, ngpus_per_node, args):
                 best_acc1 = best_acc1.to(args.gpu)
             model.load_state_dict(checkpoint['state_dict'])
             optimizer.load_state_dict(checkpoint['optimizer'])
+
+            model = freeze_backbone(model)
             print("=> loaded checkpoint '{}' (epoch {})"
                   .format(args.resume, checkpoint['epoch']))
-            print("=> freezing backbone and unfreezing layer head")
-            model = freeze_backbone(model)
-            print("=> finished freezing and unfreezing model checkpoint")
         else:
             print("=> no checkpoint found at '{}'".format(args.resume))
 
@@ -227,7 +238,6 @@ def main_worker(gpu, ngpus_per_node, args):
     else:
         raise NotImplementedError("This augmentations strategy is not available for contrastive learning branch!")
     val_transform = transforms.Compose([
-        # transforms.Resize(256),
         transforms.Resize((224, 224)),
         transforms.CenterCrop(224),
         transforms.ToTensor(),
@@ -290,27 +300,45 @@ def main_worker(gpu, ngpus_per_node, args):
     best_many, best_med, best_few, best_class = 0.0, 0.0, 0.0, []
 
     if args.reload:
-        txt_test = f'dataset/ImageNet_LT/ImageNet_LT_test.txt' if args.dataset == 'imagenet' \
-            else f'dataset/iNaturalist18/iNaturalist18_val.txt'
-        test_dataset = INaturalist(
-            root=args.data,
-            txt=txt_test,
-            transform=val_transform, train=False
-        ) if args.dataset == 'inat' else ImageNetLT(
-            root=args.data,
-            txt=txt_test,
-            transform=val_transform, train=False)
+        if args.dataset == "imagenet" or args.dataset == "inat":
+            txt_test = f'dataset/ImageNet_LT/ImageNet_LT_test.txt' if args.dataset == 'imagenet' \
+                else f'dataset/iNaturalist18/iNaturalist18_val.txt'
+            test_dataset = INaturalist(
+                root=args.data,
+                txt=txt_test,
+                transform=val_transform, train=False
+            ) if args.dataset == 'inat' else ImageNetLT(
+                root=args.data,
+                txt=txt_test,
+                transform=val_transform, train=False)
 
-        test_loader = torch.utils.data.DataLoader(
-            test_dataset, batch_size=args.batch_size, shuffle=False,
-            num_workers=args.workers, pin_memory=True)
-        tf_writer = None
-        acc1, many, med, few, class_accs = validate(train_loader, test_loader, model, criterion_ce, 1, args, tf_writer)
-        print('Prec@1: {:.3f}, Many Prec@1: {:.3f}, Med Prec@1: {:.3f}, Few Prec@1: {:.3f}, Class Prec@1: {}'.format(acc1,
-                                                                                                   many,
-                                                                                                   med,
-                                                                                                   few,
-                                                                                                   class_accs))
+            test_loader = torch.utils.data.DataLoader(
+                test_dataset, batch_size=args.batch_size, shuffle=False,
+                num_workers=args.workers, pin_memory=True)
+            tf_writer = None
+            acc1, many, med, few, class_accs = validate(train_loader, test_loader, model, args, tf_writer)
+            print('Prec@1: {:.3f}, Many Prec@1: {:.3f}, Med Prec@1: {:.3f}, Few Prec@1: {:.3f}, Class Prec@1: {}'.format(acc1,
+                                                                                                    many,
+                                                                                                    med,
+                                                                                                    few,
+                                                                                                    class_accs))
+
+        elif args.dataset == "mosquito":
+            val_dataset = MosquitoDataset(
+                root=os.path.join(data_dir, "val"),
+                transform=val_transform,
+                phase="val"
+            )
+            val_loader = torch.utils.data.DataLoader(
+                val_dataset, batch_size=args.batch_size, shuffle=False,
+                num_workers=args.workers, pin_memory=True)
+            tf_writer = None
+            acc1, many, med, few, class_accs = validate(train_loader, val_loader, model, args, tf_writer)
+            print('Prec@1: {:.3f}, Many Prec@1: {:.3f}, Med Prec@1: {:.3f}, Few Prec@1: {:.3f}, Class Prec@1: {}'.format(acc1,
+                                                                                                    many,
+                                                                                                    med,
+                                                                                                    few,
+                                                                                                    class_accs))
         return
 
     for epoch in range(args.start_epoch, args.epochs):
