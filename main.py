@@ -2,12 +2,12 @@ import torch
 import time
 import shutil
 from torchvision.transforms import transforms
-from torch.utils.data import DataLoader
+# from torch.utils.data import DataLoader
 import torch.nn.functional as F
 from loss.contrastive import BalSCL
 from loss.logitadjust import LogitAdjust
 import math
-# from tensorboardX import SummaryWriter
+from tensorboardX import SummaryWriter
 from dataset.inat import INaturalist
 from dataset.mosquito import MosquitoDataset
 from dataset.imagenet import ImageNetLT
@@ -18,9 +18,7 @@ import warnings
 import torch.backends.cudnn as cudnn
 import random
 from randaugment import rand_augment_transform
-import torchvision
 from utils import GaussianBlur, shot_acc
-# from torch.models.tensorboard import SummaryWriter
 import argparse
 import os
 import numpy as np
@@ -259,7 +257,7 @@ def main_worker(gpu, ngpus_per_node, args):
         )
 
     ## need consider this attribute
-    # cls_num_list = train_dataset.cls_num_list
+    print(train_dataset.class_to_idx)
     print(np.unique(train_dataset.targets, return_counts=True))
     cls_num_list = np.unique(train_dataset.targets, return_counts=True)[1].tolist()
     args.cls_num = len(cls_num_list)
@@ -277,8 +275,7 @@ def main_worker(gpu, ngpus_per_node, args):
     criterion_ce = LogitAdjust(cls_num_list).cuda(args.gpu)
     criterion_scl = BalSCL(cls_num_list, args.temp).cuda(args.gpu)
 
-    # tf_writer = SummaryWriter(log_dir=os.path.join(args.root_log, args.store_name))
-    tf_writer = None
+    tf_writer = SummaryWriter(log_dir=os.path.join(args.root_log, args.store_name))
     best_acc1 = 0.0
     best_many, best_med, best_few, best_class = 0.0, 0.0, 0.0, []
 
@@ -310,7 +307,6 @@ def main_worker(gpu, ngpus_per_node, args):
         adjust_lr(optimizer, epoch, args)
 
         # train for one epoch
-        tf_writer = None
         train(train_loader, model, criterion_ce, criterion_scl, optimizer, epoch, args, tf_writer)
 
         # evaluate on validation set
@@ -382,9 +378,9 @@ def train(train_loader, model, criterion_ce, criterion_scl, optimizer, epoch, ar
                 epoch, i, len(train_loader), batch_time=batch_time,
                 ce_loss=ce_loss_all, scl_loss=scl_loss_all, top1=top1, ))  # TODO
             print(output)
-    # tf_writer.add_scalar('CE loss/train', ce_loss_all.avg, epoch)
-    # tf_writer.add_scalar('SCL loss/train', scl_loss_all.avg, epoch)
-    # tf_writer.add_scalar('acc/train_top1', top1.avg, epoch)
+    tf_writer.add_scalar('CE loss/train', ce_loss_all.avg, epoch)
+    tf_writer.add_scalar('SCL loss/train', scl_loss_all.avg, epoch)
+    tf_writer.add_scalar('acc/train_top1', top1.avg, epoch)
 
 
 def validate(train_loader, val_loader, model, criterion_ce, epoch, args, tf_writer=None, flag='val'):
@@ -421,8 +417,8 @@ def validate(train_loader, val_loader, model, criterion_ce, epoch, args, tf_writ
                 i, len(val_loader), batch_time=batch_time, ce_loss=ce_loss_all, top1=top1, ))  # TODO
             print(output)
 
-        # tf_writer.add_scalar('CE loss/val', ce_loss_all.avg, epoch)
-        # tf_writer.add_scalar('acc/val_top1', top1.avg, epoch)
+        tf_writer.add_scalar('CE loss/val', ce_loss_all.avg, epoch)
+        tf_writer.add_scalar('acc/val_top1', top1.avg, epoch)
 
         probs, preds = F.softmax(total_logits.detach(), dim=1).max(dim=1)
         many_acc_top1, median_acc_top1, low_acc_top1, class_accs = shot_acc(preds, total_labels, train_loader,
