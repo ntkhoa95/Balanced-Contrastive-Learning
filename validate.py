@@ -106,7 +106,7 @@ def main_worker(gpu, ngpus_per_node, args):
         model = ModelwEmb(
             num_classes=num_classes,
             arch=args.arch,
-            pretrained=True,
+            pretrained=False,
             feat_dim=feat_dim
         )
     else:
@@ -158,6 +158,7 @@ def main_worker(gpu, ngpus_per_node, args):
         transforms.Resize((224, 224)),
         transforms.CenterCrop((224, 224)),
         transforms.RandomHorizontalFlip(),
+        transforms.RandomVerticalFlip(),
         transforms.RandomApply([
             transforms.ColorJitter(0.4, 0.4, 0., 0.0)
         ], p=0.5),
@@ -169,6 +170,7 @@ def main_worker(gpu, ngpus_per_node, args):
         transforms.Resize((224, 224)),
         transforms.CenterCrop((224, 224)),
         transforms.RandomHorizontalFlip(),
+        transforms.RandomVerticalFlip(),
         transforms.RandomApply([
             transforms.ColorJitter(0.4, 0.4, 0., 0.)
         ], p=0.5),
@@ -178,9 +180,16 @@ def main_worker(gpu, ngpus_per_node, args):
         normalize,
     ]
     augmentation_sim = [
+        transforms.RandomApply([
+            transforms.RandomRotation(degrees=90),
+            transforms.RandomRotation(degrees=180),
+            transforms.RandomRotation(degrees=270)
+        ], p=0.5),
+        transforms.RandomAdjustSharpness(3, p=0.5),
         transforms.Resize((224, 224)),
         transforms.CenterCrop((224, 224)),
         transforms.RandomHorizontalFlip(),
+        transforms.RandomVerticalFlip(),
         transforms.RandomApply([
             transforms.ColorJitter(0.4, 0.4, 0., 0.)  # not strengthened
         ], p=0.5),
@@ -194,7 +203,7 @@ def main_worker(gpu, ngpus_per_node, args):
     elif args.cl_views == 'sim-rand':
         transform_train = [transforms.Compose(augmentation_randncls), transforms.Compose(augmentation_randnclsstack),
                            transforms.Compose(augmentation_sim), ]
-    elif args.cl_views == 'randstack-randstack':
+    elif args.cl_views == 'rand-rand':
         transform_train = [transforms.Compose(augmentation_randncls), transforms.Compose(augmentation_randnclsstack),
                            transforms.Compose(augmentation_randnclsstack), ]
     else:
@@ -312,7 +321,8 @@ def validate(train_loader, val_loader, model, args, flag='val'):
         end = time.time()
         for i, data in enumerate(val_loader):
             inputs, targets = data
-            inputs, targets = inputs.cuda(), targets.cuda()
+            inputs, targets = inputs.cuda(), targets.cuda() #[B, 3, img_size, img_size], [B]
+
             batch_size = targets.size(0)
             feat_mlp, logits, centers = model(inputs)
 
