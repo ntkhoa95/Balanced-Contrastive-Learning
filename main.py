@@ -199,9 +199,12 @@ def main_worker(gpu, ngpus_per_node, args):
     ]
     augmentation_sim = [
         # transforms.RandomResizedCrop(224),
+        transforms.RandomRotation(degrees=(0, 180)),
+        transforms.RandomAdjustSharpness(3, p=0.5),
         transforms.Resize((224, 224)),
         transforms.CenterCrop((224, 224)),
         transforms.RandomHorizontalFlip(),
+        transforms.RandomVerticalFlip(),
         transforms.RandomApply([
             transforms.ColorJitter(0.4, 0.4, 0., 0.)  # not strengthened
         ], p=0.5),
@@ -215,7 +218,7 @@ def main_worker(gpu, ngpus_per_node, args):
     elif args.cl_views == 'sim-rand':
         transform_train = [transforms.Compose(augmentation_randncls), transforms.Compose(augmentation_randnclsstack),
                            transforms.Compose(augmentation_sim), ]
-    elif args.cl_views == 'randstack-randstack':
+    elif args.cl_views == 'rand-rand':
         transform_train = [transforms.Compose(augmentation_randncls), transforms.Compose(augmentation_randnclsstack),
                            transforms.Compose(augmentation_randnclsstack), ]
     else:
