@@ -19,6 +19,7 @@ import torch.backends.cudnn as cudnn
 import random
 from randaugment import rand_augment_transform
 from utils import GaussianBlur, shot_acc
+from utils import count_parameters, freeze_backbone
 import argparse
 import os
 import numpy as np
@@ -149,6 +150,9 @@ def main_worker(gpu, ngpus_per_node, args):
             optimizer.load_state_dict(checkpoint['optimizer'])
             print("=> loaded checkpoint '{}' (epoch {})"
                   .format(args.resume, checkpoint['epoch']))
+            print("=> freezing backbone and unfreezing layer head")
+            model = freeze_backbone(model)
+            print("=> finished freezing and unfreezing model checkpoint")
         else:
             print("=> no checkpoint found at '{}'".format(args.resume))
 
