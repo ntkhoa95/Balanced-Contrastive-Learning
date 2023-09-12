@@ -4,6 +4,21 @@ import numpy as np
 import torch
 
 
+## freezing
+def count_parameters(model):
+    return sum(p.numel() for p in model.parameters() if p.requires_grad)
+
+def freeze_backbone(model):
+    num_train_params = count_parameters(model)
+    print(f"Train params before freezing: {num_train_params}")
+    for parameter in model.parameters():
+        parameter.requires_grad = False
+    for parameter in model.head.parameters():
+        parameter.requires_grad = True
+    num_train_params = count_parameters(model)
+    print(f"Train params after freezing: {num_train_params}")
+    return model
+        
 class GaussianBlur(object):
     """Gaussian blur augmentation in SimCLR https://arxiv.org/abs/2002.05709"""
 
