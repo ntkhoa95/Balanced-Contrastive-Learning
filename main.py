@@ -352,10 +352,12 @@ def main_worker(gpu, ngpus_per_node, args):
         # adjust_lr(optimizer, epoch, args)
 
         # train for one epoch
-        train(train_loader, model, criterion_ce, criterion_scl, optimizer, epoch, args, tf_writer)
+        train_loss = train(train_loader, model, criterion_ce, criterion_scl, optimizer, epoch, args, tf_writer)
 
         lr = scheduler.optimizer.param_groups[0]["lr"]
 
+        scheduler.step(train_loss)
+      
         # evaluate on validation set
         acc1, many, med, few, class_accs = validate(train_loader, val_loader, model, criterion_ce, epoch, args,
                                         tf_writer)
