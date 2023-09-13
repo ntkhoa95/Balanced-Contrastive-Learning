@@ -21,6 +21,7 @@ import argparse
 import os
 import numpy as np
 from tqdm import tqdm
+from torch.optim.lr_scheduler import ReduceLROnPlateau, StepLR, MultiStepLR
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--dataset', default='imagenet', choices=['inat', 'imagenet', "mosquito"])
@@ -134,7 +135,8 @@ def main_worker(gpu, ngpus_per_node, args):
 
     # optimizer = torch.optim.SGD(model.parameters(), args.lr, momentum=args.momentum, weight_decay=args.weight_decay)
     optimizer = torch.optim.Adam(model.parameters(), args.lr, weight_decay=args.weight_decay)
-
+    scheduler = ReduceLROnPlateau(optimizer=optimizer, factor=0.9, patience=5)
+  
     ## freezing
     def count_parameters(model):
         return sum(p.numel() for p in model.parameters() if p.requires_grad)
@@ -162,7 +164,7 @@ def main_worker(gpu, ngpus_per_node, args):
                 best_acc1 = best_acc1.to(args.gpu)
             model.load_state_dict(checkpoint['state_dict'])
             optimizer.load_state_dict(checkpoint['optimizer'])
-
+            scheduler.load_state_dict(checkpoint['scheduler'])
             model = freeze_backbone(model)
             print("=> loaded checkpoint '{}' (epoch {})"
                   .format(args.resume, checkpoint['epoch']))
@@ -347,10 +349,12 @@ def main_worker(gpu, ngpus_per_node, args):
         return
 
     for epoch in range(args.start_epoch, args.epochs):
-        adjust_lr(optimizer, epoch, args)
+        # adjust_lr(optimizer, epoch, args)
 
         # train for one epoch
         train(train_loader, model, criterion_ce, criterion_scl, optimizer, epoch, args, tf_writer)
+
+        lr = scheduler.optimizer.param_groups[0]["lr"]
 
         # evaluate on validation set
         acc1, many, med, few, class_accs = validate(train_loader, val_loader, model, criterion_ce, epoch, args,
@@ -365,11 +369,8 @@ def main_worker(gpu, ngpus_per_node, args):
             best_few = few
             best_class = class_accs
             best_f1 = f1_avg
-        print('Best Prec@1: {:.3f}, F1-score: {:.3f}, \nMany Prec@1: {:.3f}, Med Prec@1: {:.3f}, Few Prec@1: {:.3f}, \nClass Prec@1: {}'.format(best_acc1, f1_avg,
-                                                                                                        best_many,
-                                                                                                        best_med,
-                                                                                                        best_few,
-                                                                                                        best_class))
+        print('Best Prec@1: {:.3f}, F1-score: {:.3f}, LR: {:.8f}, \nMany Prec@1: {:.3f}, Med Prec@1: {:.3f}, Few Prec@1: {:.3f}, \nClass Prec@1: {}'.format(best_acc1, f1_avg, lr,
+                                                                                                        best_many, best_med, best_few, best_class))
         save_checkpoint(args, {
             'epoch': epoch + 1,
             'arch': args.arch,
@@ -377,6 +378,7 @@ def main_worker(gpu, ngpus_per_node, args):
             'best_acc1': best_acc1,
             'f1_score': best_f1,
             'optimizer': optimizer.state_dict(),
+            'scheduler': scheduler.state_dict(),
         }, is_best)
 
 
@@ -431,6 +433,7 @@ def train(train_loader, model, criterion_ce, criterion_scl, optimizer, epoch, ar
     tf_writer.add_scalar('Accum loss/train', accum_loss_all.avg, epoch)
     tf_writer.add_scalar('acc/train_top1', top1.avg, epoch)
 
+    return accum_loss_all.avg
 
 def validate(train_loader, val_loader, model, criterion_ce, epoch, args, tf_writer=None, flag='val'):
     model.eval()
