@@ -16,10 +16,11 @@ import warnings
 import torch.backends.cudnn as cudnn
 import random
 from randaugment import rand_augment_transform
-from utils import GaussianBlur, shot_acc
+from utils import GaussianBlur, shot_acc, F_measure
 import argparse
 import os
 import numpy as np
+from tqdm import tqdm
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--dataset', default='imagenet', choices=['inat', 'imagenet', "mosquito"])
@@ -132,7 +133,7 @@ def main_worker(gpu, ngpus_per_node, args):
     #     model = torch.nn.DataParallel(model).cuda()
 
     # optimizer = torch.optim.SGD(model.parameters(), args.lr, momentum=args.momentum, weight_decay=args.weight_decay)
-    optimizer = torch.optim.AdamW(model.parameters(), args.lr, weight_decay=args.weight_decay)
+    optimizer = torch.optim.Adam(model.parameters(), args.lr, weight_decay=args.weight_decay)
 
     ## freezing
     def count_parameters(model):
@@ -301,7 +302,7 @@ def main_worker(gpu, ngpus_per_node, args):
 
     tf_writer = SummaryWriter(log_dir=os.path.join(args.root_log, args.store_name))
     best_acc1 = 0.0
-    best_many, best_med, best_few, best_class = 0.0, 0.0, 0.0, []
+    best_f1, best_many, best_med, best_few, best_class = 0.0, 0.0, 0.0, 0.0, []
 
     if args.reload:
         if args.dataset == "imagenet" or args.dataset == "inat":
@@ -320,8 +321,8 @@ def main_worker(gpu, ngpus_per_node, args):
                 test_dataset, batch_size=args.batch_size, shuffle=False,
                 num_workers=args.workers, pin_memory=True)
             tf_writer = None
-            acc1, many, med, few, class_accs = validate(train_loader, test_loader, model, args, tf_writer)
-            print('Prec@1: {:.3f}, Many Prec@1: {:.3f}, Med Prec@1: {:.3f}, Few Prec@1: {:.3f}, Class Prec@1: {}'.format(acc1,
+            acc1, f1_avg, many, med, few, class_accs = validate(train_loader, test_loader, model, args, tf_writer)
+            print('Prec@1: {:.3f}, F1-score: {:.3f}, \nMany Prec@1: {:.3f}, Med Prec@1: {:.3f}, Few Prec@1: {:.3f}, \nClass Prec@1: {}'.format(acc1, f1_avg,
                                                                                                     many,
                                                                                                     med,
                                                                                                     few,
@@ -337,8 +338,8 @@ def main_worker(gpu, ngpus_per_node, args):
                 val_dataset, batch_size=args.batch_size, shuffle=False,
                 num_workers=args.workers, pin_memory=True)
             tf_writer = None
-            acc1, many, med, few, class_accs = validate(train_loader, val_loader, model, args, tf_writer)
-            print('Prec@1: {:.3f}, Many Prec@1: {:.3f}, Med Prec@1: {:.3f}, Few Prec@1: {:.3f}, Class Prec@1: {}'.format(acc1,
+            acc1, f1_avg, many, med, few, class_accs = validate(train_loader, val_loader, model, args, tf_writer)
+            print('Prec@1: {:.3f}, F1-score: {:.3f}, \nMany Prec@1: {:.3f}, Med Prec@1: {:.3f}, Few Prec@1: {:.3f}, \nClass Prec@1: {}'.format(acc1, f1_avg,
                                                                                                     many,
                                                                                                     med,
                                                                                                     few,
@@ -363,7 +364,8 @@ def main_worker(gpu, ngpus_per_node, args):
             best_med = med
             best_few = few
             best_class = class_accs
-        print('Best Prec@1: {:.3f}, Many Prec@1: {:.3f}, Med Prec@1: {:.3f}, Few Prec@1: {:.3f}, Class Prec@1: {}'.format(best_acc1,
+            best_f1 = f1_avg
+        print('Best Prec@1: {:.3f}, F1-score: {:.3f}, \nMany Prec@1: {:.3f}, Med Prec@1: {:.3f}, Few Prec@1: {:.3f}, \nClass Prec@1: {}'.format(best_acc1, f1_avg,
                                                                                                         best_many,
                                                                                                         best_med,
                                                                                                         best_few,
@@ -373,6 +375,7 @@ def main_worker(gpu, ngpus_per_node, args):
             'arch': args.arch,
             'state_dict': model.state_dict(),
             'best_acc1': best_acc1,
+            'f1_score': best_f1,
             'optimizer': optimizer.state_dict(),
         }, is_best)
 
@@ -381,6 +384,7 @@ def train(train_loader, model, criterion_ce, criterion_scl, optimizer, epoch, ar
     batch_time = AverageMeter('Time', ':6.3f')
     ce_loss_all = AverageMeter('CE_Loss', ':.4e')
     scl_loss_all = AverageMeter('SCL_Loss', ':.4e')
+    accum_loss_all = AverageMeter('Accum_Loss', ':.4e')
     top1 = AverageMeter('Acc@1', ':6.2f')
 
     model.train()
@@ -401,6 +405,7 @@ def train(train_loader, model, criterion_ce, criterion_scl, optimizer, epoch, ar
 
         ce_loss_all.update(ce_loss.item(), batch_size)
         scl_loss_all.update(scl_loss.item(), batch_size)
+        accum_loss_all.update(loss.item(), batch_size)
         acc1 = accuracy(logits, targets, topk=(1,))
         top1.update(acc1[0].item(), batch_size)
 
@@ -416,12 +421,14 @@ def train(train_loader, model, criterion_ce, criterion_scl, optimizer, epoch, ar
                       'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
                       'CE_Loss {ce_loss.val:.4f} ({ce_loss.avg:.4f})\t'
                       'SCL_Loss {scl_loss.val:.4f} ({scl_loss.avg:.4f})\t'
+                      'Accum_Loss {loss.val:.4f} ({loss.avg:.4f})\t'
                       'Prec@1 {top1.val:.3f} ({top1.avg:.3f})'.format(
                 epoch, i, len(train_loader), batch_time=batch_time,
-                ce_loss=ce_loss_all, scl_loss=scl_loss_all, top1=top1, ))  # TODO
+                ce_loss=ce_loss_all, scl_loss=scl_loss_all, loss=accum_loss_all, top1=top1, ))  # TODO
             print(output)
     tf_writer.add_scalar('CE loss/train', ce_loss_all.avg, epoch)
     tf_writer.add_scalar('SCL loss/train', scl_loss_all.avg, epoch)
+    tf_writer.add_scalar('Accum loss/train', accum_loss_all.avg, epoch)
     tf_writer.add_scalar('acc/train_top1', top1.avg, epoch)
 
 
@@ -465,7 +472,9 @@ def validate(train_loader, val_loader, model, criterion_ce, epoch, args, tf_writ
         probs, preds = F.softmax(total_logits.detach(), dim=1).max(dim=1)
         many_acc_top1, median_acc_top1, low_acc_top1, class_accs = shot_acc(preds, total_labels, train_loader,
                                                                 acc_per_cls=True)
-        return top1.avg, many_acc_top1, median_acc_top1, low_acc_top1, class_accs
+        f1_avg = F_measure(preds, total_labels)
+
+        return top1.avg, f1_avg, many_acc_top1, median_acc_top1, low_acc_top1, class_accs
 
 
 def save_checkpoint(args, state, is_best):
